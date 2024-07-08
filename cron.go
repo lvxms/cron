@@ -311,6 +311,12 @@ func (c *Cron) startJob(j Job, ID EntryID, args interface{}) {
 	}(ID, args)
 }
 
+// 立即运行指定的作业
+func (c *Cron) RunJob(ID EntryID) {
+	en := c.Entry(ID)
+	c.startJob(en.WrappedJob, en.ID, en.Args)
+}
+
 // now returns current time in c location
 func (c *Cron) now() time.Time {
 	return time.Now().In(c.location)
