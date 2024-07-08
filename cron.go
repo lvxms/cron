@@ -28,7 +28,7 @@ type Cron struct {
 
 // Job is an interface for submitted cron jobs.
 type Job interface {
-	Run()
+	Run(ID EntryID, args interface{})
 }
 
 // Schedule describes a job's duty cycle.
@@ -64,6 +64,8 @@ type Entry struct {
 	// It is kept around so that user code that needs to get at the job later,
 	// e.g. via Entries() can do so.
 	Job Job
+
+	Args interface{}
 }
 
 // Valid returns true if this is not the zero entry.
@@ -92,17 +94,17 @@ func (s byTime) Less(i, j int) bool {
 //
 // Available Settings
 //
-//   Time Zone
-//     Description: The time zone in which schedules are interpreted
-//     Default:     time.Local
+//	Time Zone
+//	  Description: The time zone in which schedules are interpreted
+//	  Default:     time.Local
 //
-//   Parser
-//     Description: Parser converts cron spec strings into cron.Schedules.
-//     Default:     Accepts this spec: https://en.wikipedia.org/wiki/Cron
+//	Parser
+//	  Description: Parser converts cron spec strings into cron.Schedules.
+//	  Default:     Accepts this spec: https://en.wikipedia.org/wiki/Cron
 //
-//   Chain
-//     Description: Wrap submitted jobs to customize behavior.
-//     Default:     A chain that recovers panics and logs them to stderr.
+//	Chain
+//	  Description: Wrap submitted jobs to customize behavior.
+//	  Default:     A chain that recovers panics and logs them to stderr.
 //
 // See "cron.With*" to modify the default behavior.
 func New(opts ...Option) *Cron {
@@ -126,31 +128,31 @@ func New(opts ...Option) *Cron {
 }
 
 // FuncJob is a wrapper that turns a func() into a cron.Job
-type FuncJob func()
+type FuncJob func(ID EntryID, args interface{})
 
-func (f FuncJob) Run() { f() }
+func (f FuncJob) Run(ID EntryID, args interface{}) { f(ID, args) }
 
 // AddFunc adds a func to the Cron to be run on the given schedule.
 // The spec is parsed using the time zone of this Cron instance as the default.
 // An opaque ID is returned that can be used to later remove it.
-func (c *Cron) AddFunc(spec string, cmd func()) (EntryID, error) {
-	return c.AddJob(spec, FuncJob(cmd))
+func (c *Cron) AddFunc(spec string, args interface{}, cmd func(ID EntryID, args interface{})) (EntryID, error) {
+	return c.AddJob(spec, args, FuncJob(cmd))
 }
 
 // AddJob adds a Job to the Cron to be run on the given schedule.
 // The spec is parsed using the time zone of this Cron instance as the default.
 // An opaque ID is returned that can be used to later remove it.
-func (c *Cron) AddJob(spec string, cmd Job) (EntryID, error) {
+func (c *Cron) AddJob(spec string, args interface{}, cmd Job) (EntryID, error) {
 	schedule, err := c.parser.Parse(spec)
 	if err != nil {
 		return 0, err
 	}
-	return c.Schedule(schedule, cmd), nil
+	return c.Schedule(schedule, args, cmd), nil
 }
 
 // Schedule adds a Job to the Cron to be run on the given schedule.
 // The job is wrapped with the configured Chain.
-func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
+func (c *Cron) Schedule(schedule Schedule, args interface{}, cmd Job) EntryID {
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
 	c.nextID++
@@ -265,7 +267,7 @@ func (c *Cron) run() {
 					if e.Next.After(now) || e.Next.IsZero() {
 						break
 					}
-					c.startJob(e.WrappedJob)
+					c.startJob(e.WrappedJob, e.ID, e.Args)
 					e.Prev = e.Next
 					e.Next = e.Schedule.Next(now)
 					c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
@@ -300,12 +302,12 @@ func (c *Cron) run() {
 }
 
 // startJob runs the given job in a new goroutine.
-func (c *Cron) startJob(j Job) {
+func (c *Cron) startJob(j Job, ID EntryID, args interface{}) {
 	c.jobWaiter.Add(1)
-	go func() {
+	go func(ID EntryID, args interface{}) {
 		defer c.jobWaiter.Done()
-		j.Run()
-	}()
+		j.Run(ID, args)
+	}(ID, args)
 }
 
 // now returns current time in c location
