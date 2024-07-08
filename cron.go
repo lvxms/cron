@@ -161,6 +161,7 @@ func (c *Cron) Schedule(schedule Schedule, args interface{}, cmd Job) EntryID {
 		Schedule:   schedule,
 		WrappedJob: c.chain.Then(cmd),
 		Job:        cmd,
+		Args:       args,
 	}
 	if !c.running {
 		c.entries = append(c.entries, entry)
